@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Custom Video Player with Gemini</title>
+    <title>Ultimate Video Player</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; margin: 20px; background-color: #f4f4f4; color: #333; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
@@ -16,8 +16,8 @@
         .input-group input { flex-grow: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
         .input-group button { padding: 10px 20px; font-size: 16px; cursor: pointer; color: white; border: none; border-radius: 4px; background-color: #c4302b; }
         
-        /* 完全に自前のプレイヤーエリア */
-        .video-wrapper { position: relative; width: 100%; padding-top: 56.25%; background-color: #000; border-radius: 8px; overflow: hidden; margin-bottom: 20px; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        /* プレイヤーエリア（videoタグ専用） */
+        .video-wrapper { position: relative; width: 100%; padding-top: 56.25%; background-color: #000; border-radius: 8px; overflow: hidden; margin-bottom: 20px; border: 1px solid #333; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         .loading-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 16px; z-index: 5; text-align: center;}
         
         .sidebar { width: 320px; flex-shrink: 0; }
@@ -47,18 +47,17 @@
         <h1>Custom Video Player</h1>
         <div class="main-content">
             <div class="player-and-search">
-                <h2>1. 動画を検索・再生</h2>
                 <div id="search-container">
                     <script async src="https://cse.google.com/cse.js?cx=d02f1e46ace6b4d88"></script>
                     <div class="gcse-search"></div>
                 </div>
-                <div class="input-group">
+                <div class="input-group" style="margin-top:15px;">
                     <input type="text" id="youtubeUrl" placeholder="URLを貼り付けるか、上で検索してクリック">
                     <button id="playButton">表示</button>
                 </div>
                 
                 <div class="video-wrapper" id="videoContainer">
-                    <div class="loading-text" id="loadingText" style="display:none;">動画ストリームを抽出中...</div>
+                    <div class="loading-text" id="loadingText" style="display:none;">動画データを抽出中...</div>
                 </div>
                 <p id="errorMessage" style="color:red; text-align:center; font-weight:bold;"></p>
             </div>
@@ -79,18 +78,18 @@
     </div>
 
     <script>
-        // ▼▼▼ APIキーを " " の間に貼り付けてください。 " を消さないでください！ ▼▼▼
-        const GEMINI_API_KEY = "AQ.Ab8RN6JbKiJp30cKbyVYqfyij4GxdktlPbl8E433piW-emg56A";
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        // ▼▼▼ APIキーを " " の間に貼り付けてください ▼▼▼
+        const GEMINI_API_KEY = "AQ.Ab8RN6JbKiJp30cKbyVYqfyij4GxdktlPbl8E433piW-emg56AS";
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         const urlInput = document.getElementById('youtubeUrl');
         const playButton = document.getElementById('playButton');
         const videoContainer = document.getElementById('videoContainer');
         const errorMessage = document.getElementById('errorMessage');
         const historyList = document.getElementById('historyList');
-        const HISTORY_KEY = 'customPlayerHistory';
+        const HISTORY_KEY = 'ultimatePlayerHistory';
 
-        // Google検索結果のクリックを強制横取り
+        // 検索結果クリックの強制奪取
         document.getElementById('search-container').addEventListener('click', (event) => {
             const link = event.target.closest('a');
             if (!link || !link.classList.contains('gs-title')) return;
@@ -104,41 +103,53 @@
         }, true);
 
         // ==========================================
-        // ★ CORSエラー対策版：生ストリームURLの抽出
+        // ★ 鉄壁の抽出ロジック：複数のプロキシとAPIを試行
         // ==========================================
         async function getRawVideoUrl(videoId) {
-            // Vercel上のCORSエラーを回避するため、alloriginsプロキシを経由する
-            const proxyBase = 'https://api.allorigins.win/raw?url=';
-            const apis = [
+            // 使用するプロキシとAPIの組み合わせ
+            const proxies = [
+                'https://corsproxy.io/?',
+                'https://api.allorigins.win/raw?url='
+            ];
+            const pipedApis = [
                 'https://pipedapi.kavin.rocks',
                 'https://pipedapi.tokhmi.xyz',
                 'https://pipedapi.smnz.de'
             ];
             
-            for (const api of apis) {
-                try {
-                    const targetUrl = encodeURIComponent(`${api}/streams/${videoId}`);
-                    const response = await fetch(proxyBase + targetUrl);
-                    if (!response.ok) continue;
-                    
-                    const data = await response.json();
-                    let stream = data.videoStreams.find(s => s.videoOnly === false && s.mimeType.includes('mp4'));
-                    if (stream && stream.url) return stream.url;
-                } catch (e) { 
-                    console.warn(`API抽出に失敗しました。次を試します...`);
+            for (const proxy of proxies) {
+                for (const api of pipedApis) {
+                    try {
+                        const targetUrl = encodeURIComponent(`${api}/streams/${videoId}`);
+                        console.log(`試行中: ${proxy}${targetUrl}`);
+                        
+                        const response = await fetch(proxy + targetUrl);
+                        if (!response.ok) continue;
+                        
+                        const data = await response.json();
+                        // videoOnlyでない、かつMP4のストリームを探す
+                        let stream = data.videoStreams.find(s => s.videoOnly === false && s.mimeType.includes('mp4'));
+                        
+                        if (stream && stream.url) {
+                            console.log("抽出成功！");
+                            return stream.url;
+                        }
+                    } catch (e) { 
+                        console.warn("この組み合わせは失敗しました。次を試します。");
+                    }
                 }
             }
-            throw new Error("動画の抽出に失敗しました。時間をおいて試してください。");
+            throw new Error("すべての抽出ルートがCORSまたはサーバーエラーで遮断されました。");
         }
 
         // ==========================================
-        // 動画再生メイン（普通のYouTubeを完全排除）
+        // 動画再生メイン
         // ==========================================
         async function playVideo() {
             let urlToProcess = urlInput.value.trim();
             errorMessage.textContent = '';
             document.getElementById('ai-recommendations').style.display = 'none';
-            videoContainer.innerHTML = '<div class="loading-text">動画データを抽出中...<br>（数秒かかります）</div>';
+            videoContainer.innerHTML = '<div class="loading-text">セキュリティ制限を回避しながら<br>動画データを抽出中...</div>';
             
             if (urlToProcess.includes('google.com/url?')) {
                 const params = new URLSearchParams(urlToProcess.split('?')[1]);
@@ -156,18 +167,19 @@
             const currentVideoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
             try {
-                // 1. 生のURL抽出を試みる（プロキシ経由）
+                // 1. 生のURL抽出
                 const rawUrl = await getRawVideoUrl(videoId);
                 
-                // 2. 完全に自前のクリーンなプレイヤーで再生！
+                // 2. 自前プレイヤーで再生
                 videoContainer.innerHTML = `
                     <video id="mainPlayer" controls autoplay style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; background:#000;">
                         <source src="${rawUrl}" type="video/mp4">
                     </video>
                 `;
 
-                // 3. 履歴とGemini処理 (CORS回避のためプロキシ使用)
-                const embedRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent('https://noembed.com/embed?url=' + currentVideoUrl)}`);
+                // 3. 履歴とGemini処理 (CORSプロキシ経由)
+                const metaProxy = 'https://corsproxy.io/?';
+                const embedRes = await fetch(metaProxy + encodeURIComponent('https://noembed.com/embed?url=' + currentVideoUrl));
                 const data = await embedRes.json();
                 
                 if (data.title) {
@@ -178,7 +190,7 @@
                 }
 
             } catch (error) {
-                errorMessage.textContent = error.message;
+                errorMessage.textContent = "抽出に失敗しました。この動画は公式のiframe制限がかかっている可能性があります。";
                 videoContainer.innerHTML = '';
             }
         }
@@ -190,7 +202,7 @@
         }
 
         // ==========================================
-        // Gemini API おすすめ動画
+        // Gemini API おすすめ動画 (最新モデル版)
         // ==========================================
         async function getGeminiRecommendations(videoUrl, videoTitle) {
             const apiKey = GEMINI_API_KEY.trim();
@@ -202,47 +214,45 @@
             videosArea.innerHTML = '<span style="font-size:13px; color:#555;">AIが関連動画を探しています...</span>';
 
             const prompt = `
-ユーザーは今、以下のYouTube動画を見ています。
-タイトル: ${videoTitle}
-URL: ${videoUrl}
-
-この動画の投稿者が出している他の動画や、内容が似ている最近の動画を3つ提案してください。
-出力は必ず、JavaScriptで解析できる以下のJSON形式の文字列のみを出力してください。
+ユーザーは今この動画を見ています: "${videoTitle}"
+この投稿者の他の動画や、似た動画を2つ提案してください。
+出力は以下のJSON形式のみで、余計な説明は一切不要です。
 [
-  {"title": "おすすめ動画のタイトル1", "url": "https://www.youtube.com/watch?v=推測した動画ID1"},
-  {"title": "おすすめ動画のタイトル2", "url": "https://www.youtube.com/watch?v=推測した動画ID2"}
+  {"title": "タイトル1", "url": "https://www.youtube.com/watch?v=動画ID1"},
+  {"title": "タイトル2", "url": "https://www.youtube.com/watch?v=動画ID2"}
 ]
 `;
             try {
-                // モデル指定を安定版の gemini-1.5-flash-latest に変更
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
 
-                if (!response.ok) throw new Error("Gemini API Error");
-
                 const data = await response.json();
-                let resultText = data.candidates[0].content.parts[0].text;
-                resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
-                const recommendations = JSON.parse(resultText);
-                
-                videosArea.innerHTML = '';
-                recommendations.forEach(rec => {
-                    const btn = document.createElement('button');
-                    btn.className = 'ai-video-btn';
-                    btn.innerHTML = `<span class="ai-video-title">🎥 ${rec.title}</span><span class="ai-video-url">${rec.url}</span>`;
-                    btn.onclick = () => { urlInput.value = rec.url; playVideo(); };
-                    videosArea.appendChild(btn);
-                });
+                if (data.candidates && data.candidates[0].content) {
+                    let resultText = data.candidates[0].content.parts[0].text;
+                    resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const recommendations = JSON.parse(resultText);
+                    
+                    videosArea.innerHTML = '';
+                    recommendations.forEach(rec => {
+                        const btn = document.createElement('button');
+                        btn.className = 'ai-video-btn';
+                        btn.innerHTML = `<span class="ai-video-title">🎥 ${rec.title}</span><span class="ai-video-url">${rec.url}</span>`;
+                        btn.onclick = () => { urlInput.value = rec.url; playVideo(); };
+                        videosArea.appendChild(btn);
+                    });
+                } else {
+                    throw new Error();
+                }
             } catch (error) {
                 videosArea.innerHTML = '<span style="font-size:13px; color:red;">おすすめの取得に失敗しました。</span>';
             }
         }
 
         // ==========================================
-        // 履歴・ピン留め機能
+        // 履歴・ピン留め
         // ==========================================
         function getHistory() { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
         function saveHistory(history) { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }
