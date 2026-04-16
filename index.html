@@ -16,11 +16,10 @@
         .input-group input { flex-grow: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
         .input-group button { padding: 10px 20px; font-size: 16px; cursor: pointer; color: white; border: none; border-radius: 4px; background-color: #c4302b; }
         
-        /* プレイヤーエリア */
-        .video-wrapper { position: relative; width: 100%; padding-top: 56.25%; background-color: #000; border-radius: 8px; overflow: hidden; margin-bottom: 20px; border: 1px solid #333; }
+        /* 完全に自前のプレイヤーエリア */
+        .video-wrapper { position: relative; width: 100%; padding-top: 56.25%; background-color: #000; border-radius: 8px; overflow: hidden; margin-bottom: 20px; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
         .loading-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 16px; z-index: 5; text-align: center;}
         
-        /* サイドバー・履歴 */
         .sidebar { width: 320px; flex-shrink: 0; }
         .sidebar h3 { text-align: center; margin-top: 0; }
         .history-header { display: flex; justify-content: space-between; align-items: center; }
@@ -35,7 +34,6 @@
         .pin-button.pinned { color: #f0a000; }
         li.pinned-item { background-color: #fffbef !important; }
         
-        /* AIおすすめエリア */
         #ai-recommendations { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
         #ai-recommendations h3 { margin-top: 0; font-size: 16px; color: #0277bd; }
         .ai-video-btn { display: block; width: 100%; background: #fff; border: 1px solid #0288d1; color: #0288d1; padding: 8px 12px; margin-bottom: 8px; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; transition: 0.2s; }
@@ -92,57 +90,55 @@
         const historyList = document.getElementById('historyList');
         const HISTORY_KEY = 'customPlayerHistory';
 
-        // ==========================================
-        // ★ 強化版：Google検索結果のクリックを強制横取り
-        // ==========================================
+        // Google検索結果のクリックを強制横取り
         document.getElementById('search-container').addEventListener('click', (event) => {
             const link = event.target.closest('a');
-            // Google検索結果のリンク要素(gs-title)かどうかを判定
             if (!link || !link.classList.contains('gs-title')) return;
-            
-            event.preventDefault();           // 通常のリンク移動をキャンセル
-            event.stopImmediatePropagation(); // Googleの隠し処理を強制ストップ
-
-            // Googleは data-ctorig という属性に本当のURLを隠していることがある
+            event.preventDefault();
+            event.stopImmediatePropagation();
             const url = link.getAttribute('data-ctorig') || link.href;
             if (url) {
                 urlInput.value = url;
                 playVideo();
             }
-        }, true); // true (キャプチャフェーズ) を指定することで最優先で処理させる
+        }, true);
 
         // ==========================================
-        // ★ 強化版：生ストリームURLの抽出（フォールバック付き）
+        // ★ CORSエラー対策版：生ストリームURLの抽出
         // ==========================================
         async function getRawVideoUrl(videoId) {
+            // Vercel上のCORSエラーを回避するため、alloriginsプロキシを経由する
+            const proxyBase = 'https://api.allorigins.win/raw?url=';
             const apis = [
                 'https://pipedapi.kavin.rocks',
-                'https://pipedapi.smnz.de',
-                'https://pipedapi.adminforge.de',
-                'https://pipedapi.tokhmi.xyz'
+                'https://pipedapi.tokhmi.xyz',
+                'https://pipedapi.smnz.de'
             ];
+            
             for (const api of apis) {
                 try {
-                    const response = await fetch(`${api}/streams/${videoId}`);
+                    const targetUrl = encodeURIComponent(`${api}/streams/${videoId}`);
+                    const response = await fetch(proxyBase + targetUrl);
                     if (!response.ok) continue;
+                    
                     const data = await response.json();
                     let stream = data.videoStreams.find(s => s.videoOnly === false && s.mimeType.includes('mp4'));
                     if (stream && stream.url) return stream.url;
                 } catch (e) { 
-                    console.warn(`API ${api} は混雑しています。次を試します...`);
+                    console.warn(`API抽出に失敗しました。次を試します...`);
                 }
             }
-            return null; // 全て失敗した場合は null を返す
+            throw new Error("動画の抽出に失敗しました。時間をおいて試してください。");
         }
 
         // ==========================================
-        // 動画再生メイン
+        // 動画再生メイン（普通のYouTubeを完全排除）
         // ==========================================
         async function playVideo() {
             let urlToProcess = urlInput.value.trim();
             errorMessage.textContent = '';
             document.getElementById('ai-recommendations').style.display = 'none';
-            videoContainer.innerHTML = '<div class="loading-text">動画を準備中...<br>（数秒かかる場合があります）</div>';
+            videoContainer.innerHTML = '<div class="loading-text">動画データを抽出中...<br>（数秒かかります）</div>';
             
             if (urlToProcess.includes('google.com/url?')) {
                 const params = new URLSearchParams(urlToProcess.split('?')[1]);
@@ -151,7 +147,7 @@
 
             const videoId = extractVideoId(urlToProcess);
             if (!videoId) {
-                if (urlInput.value) errorMessage.textContent = '有効なURLを入力してください。';
+                errorMessage.textContent = '有効なURLを入力してください。';
                 videoContainer.innerHTML = '';
                 return;
             }
@@ -160,26 +156,18 @@
             const currentVideoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
             try {
-                // 1. 生のURL抽出を試みる
+                // 1. 生のURL抽出を試みる（プロキシ経由）
                 const rawUrl = await getRawVideoUrl(videoId);
                 
-                if (rawUrl) {
-                    // 抽出成功：自前のクリーンなプレイヤーで再生
-                    videoContainer.innerHTML = `
-                        <video id="mainPlayer" controls autoplay style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; background:#000;">
-                            <source src="${rawUrl}" type="video/mp4">
-                        </video>
-                    `;
-                } else {
-                    // 抽出失敗：真っ暗になるのを防ぐため、自動的に通常の埋め込みで再生
-                    console.log("生データの抽出に失敗したため、通常プレイヤーで再生します。");
-                    videoContainer.innerHTML = `
-                        <iframe src="https://www.youtube.com/embed/${videoId}?autoplay=1" style="position:absolute; top:0; left:0; width:100%; height:100%; border:none; z-index:10;" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
-                    `;
-                }
+                // 2. 完全に自前のクリーンなプレイヤーで再生！
+                videoContainer.innerHTML = `
+                    <video id="mainPlayer" controls autoplay style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:10; background:#000;">
+                        <source src="${rawUrl}" type="video/mp4">
+                    </video>
+                `;
 
-                // 2. 履歴とGemini処理
-                const embedRes = await fetch(`https://noembed.com/embed?url=${currentVideoUrl}`);
+                // 3. 履歴とGemini処理 (CORS回避のためプロキシ使用)
+                const embedRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent('https://noembed.com/embed?url=' + currentVideoUrl)}`);
                 const data = await embedRes.json();
                 
                 if (data.title) {
@@ -190,7 +178,7 @@
                 }
 
             } catch (error) {
-                errorMessage.textContent = "エラーが発生しました。もう一度お試しください。";
+                errorMessage.textContent = error.message;
                 videoContainer.innerHTML = '';
             }
         }
@@ -205,7 +193,8 @@
         // Gemini API おすすめ動画
         // ==========================================
         async function getGeminiRecommendations(videoUrl, videoTitle) {
-            if (!GEMINI_API_KEY || GEMINI_API_KEY.includes('ここに')) return;
+            const apiKey = GEMINI_API_KEY.trim();
+            if (!apiKey || apiKey.includes('ここに')) return;
 
             const aiArea = document.getElementById('ai-recommendations');
             const videosArea = document.getElementById('ai-videos');
@@ -221,16 +210,18 @@ URL: ${videoUrl}
 出力は必ず、JavaScriptで解析できる以下のJSON形式の文字列のみを出力してください。
 [
   {"title": "おすすめ動画のタイトル1", "url": "https://www.youtube.com/watch?v=推測した動画ID1"},
-  {"title": "おすすめ動画のタイトル2", "url": "https://www.youtube.com/watch?v=推測した動画ID2"},
-  {"title": "おすすめ動画のタイトル3", "url": "https://www.youtube.com/watch?v=推測した動画ID3"}
+  {"title": "おすすめ動画のタイトル2", "url": "https://www.youtube.com/watch?v=推測した動画ID2"}
 ]
 `;
             try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+                // モデル指定を安定版の gemini-1.5-flash-latest に変更
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
+
+                if (!response.ok) throw new Error("Gemini API Error");
 
                 const data = await response.json();
                 let resultText = data.candidates[0].content.parts[0].text;
